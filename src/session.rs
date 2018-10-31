@@ -97,9 +97,12 @@ impl Session {
     pub fn new(options: Options) -> AMQPResult<Session> {
         let connection = try!(get_connection(&options));
         let channels = Arc::new(Mutex::new(HashMap::new()));
-        let (channel_zero_sender, channel_receiver) = sync_channel(CHANNEL_BUFFER_SIZE); //channel0
-        let channel_zero = channel::Channel::new(0, channel_receiver, connection.clone());
-        try!(channels.lock().map_err(|_| AMQPError::SyncError)).insert(0, channel_zero_sender);
+        let (channel_zero_sender, channel_receiver) =
+            sync_channel(CHANNEL_BUFFER_SIZE); //channel0
+        let channel_zero =
+            channel::Channel::new(0, channel_receiver, connection.clone());
+        try!(channels.lock().map_err(|_| AMQPError::SyncError))
+            .insert(0, channel_zero_sender);
         let con1 = connection.clone();
         let channels_clone = channels.clone();
         thread::spawn(|| Session::reading_loop(con1, channels_clone));
@@ -117,9 +120,14 @@ impl Session {
         debug!("Starting init session");
         let frame = try!(self.channel_zero.read()); //Start
         let method_frame = try!(MethodFrame::decode(&frame));
-        let start: protocol::connection::Start = match method_frame.method_name() {
+        let start: protocol::connection::Start = match method_frame
+            .method_name() {
             "connection.start" => try!(Method::decode(method_frame)),
-            meth => return Err(AMQPError::Protocol(format!("Unexpected method frame: {:?}", meth))),
+            meth => {
+                return Err(AMQPError::Protocol(
+                    format!("Unexpected method frame: {:?}", meth),
+                ))
+            }
         };
         debug!("Received connection.start: {:?}", start);
         // * The client selects a security mechanism (Start-Ok).
@@ -136,16 +144,38 @@ impl Session {
         let mut capabilities = Table::new();
         capabilities.insert("publisher_confirms".to_owned(), Bool(true));
         capabilities.insert("consumer_cancel_notify".to_owned(), Bool(true));
-        capabilities.insert("exchange_exchange_bindings".to_owned(), Bool(true));
+        capabilities.insert(
+            "exchange_exchange_bindings".to_owned(),
+            Bool(true),
+        );
         capabilities.insert("basic.nack".to_owned(), Bool(true));
         capabilities.insert("connection.blocked".to_owned(), Bool(true));
-        capabilities.insert("authentication_failure_close".to_owned(), Bool(true));
-        client_properties.insert("capabilities".to_owned(), FieldTable(capabilities));
-        client_properties.insert("product".to_owned(), LongString("rust-amqp".to_owned()));
-        client_properties.insert("platform".to_owned(), LongString("rust".to_owned()));
-        client_properties.insert("version".to_owned(), LongString(VERSION.to_owned()));
-        client_properties.insert("information".to_owned(),
-                                 LongString("https://github.com/Antti/rust-amqp".to_owned()));
+        capabilities.insert(
+            "authentication_failure_close".to_owned(),
+            Bool(true),
+        );
+        client_properties.insert(
+            "capabilities".to_owned(),
+            FieldTable(capabilities),
+        );
+        client_properties.insert(
+            "product".to_owned(),
+            LongString("rust-amqp".to_owned()),
+        );
+        client_properties.insert(
+            "platform".to_owned(),
+            LongString("rust".to_owned()),
+        );
+        client_properties.insert(
+            "version".to_owned(),
+            LongString(VERSION.to_owned()),
+        );
+        client_properties.insert(
+            "information".to_owned(),
+            LongString(
+                "https://github.com/Antti/rust-amqp".to_owned(),
+            ),
+        );
         client_properties.extend(options.properties);
 
         debug!("Sending connection.start-ok");
@@ -161,18 +191,25 @@ impl Session {
             "connection.close" => {
                 let close_frame: protocol::connection::Close =
                     try!(amq_proto::Method::decode(response));
-                return Err(AMQPError::Protocol(format!("Connection was closed: {:?}",
-                                                       close_frame)));
+                return Err(AMQPError::Protocol(
+                    format!("Connection was closed: {:?}", close_frame),
+                ));
             }
             response_method => {
-                return Err(AMQPError::Protocol(format!("Unexpected response: {}", response_method)))
+                return Err(AMQPError::Protocol(
+                    format!("Unexpected response: {}", response_method),
+                ))
             }
         };
         debug!("Received tune request: {:?}", tune);
 
-        self.channel_max_limit = negotiate(tune.channel_max, self.channel_max_limit);
-        self.connection.frame_max_limit = negotiate(tune.frame_max, options.frame_max_limit);
-        self.channel_zero.set_frame_max_limit(self.connection.frame_max_limit);
+        self.channel_max_limit =
+            negotiate(tune.channel_max, self.channel_max_limit);
+        self.connection.frame_max_limit =
+            negotiate(tune.frame_max, options.frame_max_limit);
+        self.channel_zero.set_frame_max_limit(
+            self.connection.frame_max_limit,
+        );
         let frame_max_limit = self.connection.frame_max_limit;
         let tune_ok = protocol::connection::TuneOk {
             channel_max: self.channel_max_limit,
@@ -188,8 +225,11 @@ impl Session {
             insist: false,
         };
         debug!("Sending connection.open: {:?}", open);
-        let open_ok = self.channel_zero
-            .rpc::<_, protocol::connection::OpenOk>(&open, "connection.open-ok");
+        let open_ok =
+            self.channel_zero.rpc::<_, protocol::connection::OpenOk>(
+                &open,
+                "connection.open-ok",
+            );
         match open_ok {
             Ok(_) => {
                 debug!("Connection initialized. conneciton.open-ok recieved");
@@ -216,22 +256,33 @@ impl Session {
     ///     Err(error) => panic!("Failed openning channel: {:?}", error)
     /// };
     /// ```
-    pub fn open_channel(&mut self, channel_id: u16) -> AMQPResult<channel::Channel> {
+    pub fn open_channel(
+        &mut self,
+        channel_id: u16,
+    ) -> AMQPResult<channel::Channel> {
         debug!("Openning channel: {}", channel_id);
         let (sender, receiver) = sync_channel(CHANNEL_BUFFER_SIZE);
-        let mut channel = channel::Channel::new(channel_id, receiver, self.connection.clone());
-        try!(self.channels.lock().map_err(|_| AMQPError::SyncError)).insert(channel_id, sender);
+        let mut channel = channel::Channel::new(
+            channel_id,
+            receiver,
+            self.connection.clone(),
+        );
+        try!(self.channels.lock().map_err(|_| AMQPError::SyncError))
+            .insert(channel_id, sender);
         try!(channel.open());
         Ok(channel)
     }
 
     pub fn close<T>(&mut self, reply_code: u16, reply_text: T)
-        where T: Into<String>
+    where
+        T: Into<String>,
     {
         let reply_text = reply_text.into();
-        debug!("Closing session: reply_code: {}, reply_text: {}",
-               reply_code,
-               reply_text);
+        debug!(
+            "Closing session: reply_code: {}, reply_text: {}",
+            reply_code,
+            reply_text
+        );
         let close = protocol::connection::Close {
             reply_code: reply_code,
             reply_text: reply_text,
@@ -246,9 +297,10 @@ impl Session {
 
     // Receives and dispatches frames from the connection to the corresponding
     // channels.
-    fn reading_loop(mut connection: Connection,
-                    channels: Arc<Mutex<HashMap<u16, SyncSender<AMQPResult<Frame>>>>>)
-                    -> () {
+    fn reading_loop(
+        mut connection: Connection,
+        channels: Arc<Mutex<HashMap<u16, SyncSender<AMQPResult<Frame>>>>>,
+    ) -> () {
         debug!("Starting reading loop");
         loop {
             match connection.read() {
@@ -263,20 +315,23 @@ impl Session {
                     match target {
                         Some(target_channel) => {
                             match target_channel.try_send(Ok(frame)) {
-                                Ok(()) => {},
+                                Ok(()) => {}
                                 Err(TrySendError::Disconnected(_frame)) => {
                                     warn!(
                                         "Error dispatching packet to channel {}: Receiver is gone.",
                                         &chan_id
                                     );
-                                },
+                                }
                                 Err(TrySendError::Full(frame)) => {
                                     warn!(
                                         "Error dispatching packet to channel {}: Full! Blocking until there is space.",
                                         &chan_id
                                     );
 
-                                    if let Err(err) = target_channel.send(frame) {
+                                    if let Err(err) = target_channel.send(
+                                        frame,
+                                    )
+                                    {
                                         warn!(
                                             "Error dispatching packet to channel {}, Even after waiting for a blocked write: {:?}",
                                             &chan_id,
@@ -285,8 +340,13 @@ impl Session {
                                     }
                                 }
                             }
-                        },
-                        None => error!("Received frame for an unknown channel: {}", chan_id),
+                        }
+                        None => {
+                            error!(
+                                "Received frame for an unknown channel: {}",
+                                chan_id
+                            )
+                        }
                     }
                 }
                 Err(read_err) => {
@@ -295,7 +355,9 @@ impl Session {
                     for chan in chans.values() {
                         // Propagate error to every channel, so they can close
                         if chan.send(Err(read_err.clone())).is_err() {
-                            error!("Error dispatching closing packet to a channel");
+                            error!(
+                                "Error dispatching closing packet to a channel"
+                            );
                         }
                     }
                     break;
@@ -309,8 +371,14 @@ impl Session {
 fn get_connection(options: &Options) -> AMQPResult<Connection> {
     match options.scheme {
         #[cfg(feature = "tls")]
-        AMQPScheme::AMQPS => Connection::open_tls(&options.host, options.port).map_err(From::from),
-        AMQPScheme::AMQP => Connection::open(&options.host, options.port).map_err(From::from),
+        AMQPScheme::AMQPS => {
+            Connection::open_tls(&options.host, options.port).map_err(
+                From::from,
+            )
+        }
+        AMQPScheme::AMQP => {
+            Connection::open(&options.host, options.port).map_err(From::from)
+        }
     }
 }
 fn negotiate<T: cmp::Ord>(their_value: T, our_value: T) -> T {
@@ -318,7 +386,9 @@ fn negotiate<T: cmp::Ord>(their_value: T, our_value: T) -> T {
 }
 
 fn percent_decode(string: &str) -> String {
-    percent_encoding::percent_decode(string.as_bytes()).decode_utf8_lossy().to_string()
+    percent_encoding::percent_decode(string.as_bytes())
+        .decode_utf8_lossy()
+        .to_string()
 }
 
 fn parse_url(url_string: &str) -> AMQPResult<Options> {
@@ -326,7 +396,9 @@ fn parse_url(url_string: &str) -> AMQPResult<Options> {
 
     let url = try!(Url::parse(url_string));
     if url.cannot_be_a_base() {
-        return Err(AMQPError::SchemeError("Must have relative scheme".to_string()));
+        return Err(AMQPError::SchemeError(
+            "Must have relative scheme".to_string(),
+        ));
     }
 
     let host = url.host().map(|s| s.to_string()).unwrap_or(default.host);
@@ -335,7 +407,9 @@ fn parse_url(url_string: &str) -> AMQPResult<Options> {
         #[cfg(feature = "tls")]
         "amqps" => (AMQPScheme::AMQPS, AMQPS_PORT),
         unknown_scheme => {
-            return Err(AMQPError::SchemeError(format!("Unknown scheme: {:?}", unknown_scheme)))
+            return Err(AMQPError::SchemeError(
+                format!("Unknown scheme: {:?}", unknown_scheme),
+            ))
         }
     };
     let port = url.port().unwrap_or(default_port);
@@ -349,9 +423,12 @@ fn parse_url(url_string: &str) -> AMQPResult<Options> {
 
     let login = match url.username() {
         "" => String::from(default.login),
-        username => username.to_string()
+        username => username.to_string(),
     };
-    let password = url.password().map_or(String::from(default.password), ToString::to_string);
+    let password = url.password().map_or(
+        String::from(default.password),
+        ToString::to_string,
+    );
 
     Ok(Options {
         host: host.to_string(),
@@ -370,24 +447,34 @@ mod test {
 
     #[test]
     fn test_full_parse_url() {
-        let options = parse_url("amqp://username:password@hostname:12345/vhost").expect("Failed parsing url");
+        let options = parse_url(
+            "amqp://username:password@hostname:12345/vhost",
+        ).expect("Failed parsing url");
         assert_eq!(options.host, "hostname");
         assert_eq!(options.login, "username");
         assert_eq!(options.password, "password");
         assert_eq!(options.port, 12345);
         assert_eq!(options.vhost, "vhost");
-        assert!(match options.scheme { AMQPScheme::AMQP => true, _ => false });
+        assert!(match options.scheme {
+            AMQPScheme::AMQP => true,
+            _ => false,
+        });
     }
 
     #[test]
     fn test_full_parse_url_with_ip() {
-        let options = parse_url("amqp://username:password@123.123.123.123:12345/vhost").expect("Failed parsing url");
+        let options = parse_url(
+            "amqp://username:password@123.123.123.123:12345/vhost",
+        ).expect("Failed parsing url");
         assert_eq!(options.host, "123.123.123.123");
         assert_eq!(options.login, "username");
         assert_eq!(options.password, "password");
         assert_eq!(options.port, 12345);
         assert_eq!(options.vhost, "vhost");
-        assert!(match options.scheme { AMQPScheme::AMQP => true, _ => false });
+        assert!(match options.scheme {
+            AMQPScheme::AMQP => true,
+            _ => false,
+        });
     }
 
     #[test]

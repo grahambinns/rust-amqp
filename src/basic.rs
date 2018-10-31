@@ -22,38 +22,61 @@ pub struct GetIterator<'a> {
 }
 
 pub trait Basic<'a> {
-    fn basic_get(&'a mut self, queue: &'a str, no_ack: bool) -> GetIterator<'a>;
-    fn basic_consume<T, S>(&mut self,
-                           callback: T,
-                           queue: S,
-                           consumer_tag: S,
-                           no_local: bool,
-                           no_ack: bool,
-                           exclusive: bool,
-                           nowait: bool,
-                           arguments: Table)
-                           -> AMQPResult<String>
-        where T: Consumer + 'static,
-              S: Into<String>;
-    fn basic_publish<S>(&mut self,
-                        exchange: S,
-                        routing_key: S,
-                        mandatory: bool,
-                        immediate: bool,
-                        properties: BasicProperties,
-                        content: Vec<u8>)
-                        -> AMQPResult<()>
-        where S: Into<String>;
-    fn basic_ack(&mut self, delivery_tag: u64, multiple: bool) -> AMQPResult<()>;
-    fn basic_nack(&mut self, delivery_tag: u64, multiple: bool, requeue: bool) -> AMQPResult<()>;
-    fn basic_reject(&mut self, delivery_tag: u64, requeue: bool) -> AMQPResult<()>;
+    fn basic_get(&'a mut self, queue: &'a str, no_ack: bool)
+        -> GetIterator<'a>;
+    fn basic_consume<T, S>(
+        &mut self,
+        callback: T,
+        queue: S,
+        consumer_tag: S,
+        no_local: bool,
+        no_ack: bool,
+        exclusive: bool,
+        nowait: bool,
+        arguments: Table,
+    ) -> AMQPResult<String>
+    where
+        T: Consumer + 'static,
+        S: Into<String>;
+    fn basic_publish<S>(
+        &mut self,
+        exchange: S,
+        routing_key: S,
+        mandatory: bool,
+        immediate: bool,
+        properties: BasicProperties,
+        content: Vec<u8>,
+    ) -> AMQPResult<()>
+    where
+        S: Into<String>;
+    fn basic_ack(
+        &mut self,
+        delivery_tag: u64,
+        multiple: bool,
+    ) -> AMQPResult<()>;
+    fn basic_nack(
+        &mut self,
+        delivery_tag: u64,
+        multiple: bool,
+        requeue: bool,
+    ) -> AMQPResult<()>;
+    fn basic_reject(
+        &mut self,
+        delivery_tag: u64,
+        requeue: bool,
+    ) -> AMQPResult<()>;
     fn basic_prefetch(&mut self, prefetch_count: u16) -> AMQPResult<QosOk>;
-    fn basic_qos(&mut self,
-                 prefetch_size: u32,
-                 prefetch_count: u16,
-                 global: bool)
-                 -> AMQPResult<QosOk>;
-    fn basic_cancel(&mut self, consumer_tag: String, no_wait: bool) -> AMQPResult<CancelOk>;
+    fn basic_qos(
+        &mut self,
+        prefetch_size: u32,
+        prefetch_count: u16,
+        global: bool,
+    ) -> AMQPResult<QosOk>;
+    fn basic_cancel(
+        &mut self,
+        consumer_tag: String,
+        no_wait: bool,
+    ) -> AMQPResult<CancelOk>;
 }
 
 // #[derive(Debug)]
@@ -84,9 +107,11 @@ impl<'a> Iterator for GetIterator<'a> {
         };
         match method_frame.method_name() {
             "basic.get-ok" => {
-                let reply: basic::GetOk = Method::decode(method_frame).ok().unwrap();
+                let reply: basic::GetOk =
+                    Method::decode(method_frame).ok().unwrap();
                 let headers = self.channel.read_headers().ok().unwrap();
-                let body = self.channel.read_body(headers.body_size).ok().unwrap();
+                let body =
+                    self.channel.read_body(headers.body_size).ok().unwrap();
                 let properties = BasicProperties::decode(headers).ok().unwrap();
                 Some(GetResult {
                     headers: properties,
@@ -133,7 +158,13 @@ impl<'a> GetIterator<'a> {
                         try!(self.channel.basic_ack(delivery_tag, false))
                     }
                     AckAction::Nack(delivery_tag, requeue) => {
-                        try!(self.channel.basic_nack(delivery_tag, false, requeue))
+                        try!(
+                            self.channel.basic_nack(
+                                delivery_tag,
+                                false,
+                                requeue,
+                            )
+                        )
                     }
                     AckAction::Reject(delivery_tag, requeue) => {
                         try!(self.channel.basic_reject(delivery_tag, requeue))
@@ -148,12 +179,18 @@ impl<'a> GetIterator<'a> {
 
 impl GetResult {
     pub fn ack(&self) {
-        self.ack_sender.try_send(AckAction::Ack(self.reply.delivery_tag)).unwrap_or(());
+        self.ack_sender
+            .try_send(AckAction::Ack(self.reply.delivery_tag))
+            .unwrap_or(());
     }
     pub fn nack(&self, requeue: bool) {
-        self.ack_sender.try_send(AckAction::Nack(self.reply.delivery_tag, requeue)).unwrap_or(());
+        self.ack_sender
+            .try_send(AckAction::Nack(self.reply.delivery_tag, requeue))
+            .unwrap_or(());
     }
     pub fn reject(&self, requeue: bool) {
-        self.ack_sender.try_send(AckAction::Reject(self.reply.delivery_tag, requeue)).unwrap_or(());
+        self.ack_sender
+            .try_send(AckAction::Reject(self.reply.delivery_tag, requeue))
+            .unwrap_or(());
     }
 }

@@ -69,9 +69,11 @@ impl Connection {
                 // bytes extra)
                 let frame_type = frame.frame_type;
                 let channel = frame.channel;
-                for content_frame in split_content_into_frames(frame.payload.into_inner(),
-                                                               self.frame_max_limit)
-                    .into_iter() {
+                for content_frame in split_content_into_frames(
+                    frame.payload.into_inner(),
+                    self.frame_max_limit,
+                ).into_iter()
+                {
                     try!(self.write_frame(Frame {
                         frame_type: frame_type,
                         channel: channel,
@@ -86,9 +88,13 @@ impl Connection {
 
     pub fn read(&mut self) -> AMQPResult<Frame> {
         match self.socket {
-            AMQPStream::Cleartext(ref mut stream) => Frame::decode(stream).map_err(From::from),
+            AMQPStream::Cleartext(ref mut stream) => {
+                Frame::decode(stream).map_err(From::from)
+            }
             #[cfg(feature = "tls")]
-            AMQPStream::Tls(ref mut stream) => Frame::decode(stream).map_err(From::from),
+            AMQPStream::Tls(ref mut stream) => {
+                Frame::decode(stream).map_err(From::from)
+            }
         }
     }
 
@@ -98,23 +104,32 @@ impl Connection {
                 Ok(try!(stream.write_all(&try!(frame.encode()))))
             }
             #[cfg(feature = "tls")]
-            AMQPStream::Tls(ref mut stream) => Ok(try!(stream.write_all(&try!(frame.encode())))),
+            AMQPStream::Tls(ref mut stream) => Ok(try!(stream.write_all(
+                &try!(frame.encode()),
+            ))),
         }
     }
 }
 
 fn init_connection<T>(stream: &mut T) -> AMQPResult<()>
-    where T: Write
+where
+    T: Write,
 {
-    stream.write_all(&[b'A', b'M', b'Q', b'P', 0, 0, 9, 1]).map_err(From::from)
+    stream
+        .write_all(&[b'A', b'M', b'Q', b'P', 0, 0, 9, 1])
+        .map_err(From::from)
 }
 
-fn split_content_into_frames(content: Vec<u8>, frame_limit: u32) -> Vec<Vec<u8>> {
+fn split_content_into_frames(
+    content: Vec<u8>,
+    frame_limit: u32,
+) -> Vec<Vec<u8>> {
     assert!(frame_limit > 0, "Can't have frame_max_limit == 0");
     let mut content_frames = vec![];
     let mut current_pos = 0;
     while current_pos < content.len() {
-        let new_pos = current_pos + cmp::min(content.len() - current_pos, frame_limit as usize);
+        let new_pos = current_pos +
+            cmp::min(content.len() - current_pos, frame_limit as usize);
         content_frames.push(content[current_pos..new_pos].to_vec());
         current_pos = new_pos;
     }
@@ -126,6 +141,8 @@ fn split_content_into_frames(content: Vec<u8>, frame_limit: u32) -> Vec<Vec<u8>>
 fn test_split_content_into_frames() {
     let content = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     let frames = split_content_into_frames(content, 3);
-    assert_eq!(frames,
-               vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9], vec![10]]);
+    assert_eq!(
+        frames,
+        vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9], vec![10]]
+    );
 }

@@ -5,7 +5,8 @@ use channel::{Channel, Consumer};
 use protocol;
 
 pub struct ConsumeBuilder<T>
-    where T: Consumer + 'static
+where
+    T: Consumer + 'static,
 {
     _callback: T,
     _queue_name: String,
@@ -17,10 +18,10 @@ pub struct ConsumeBuilder<T>
     _arguments: Table,
 }
 
-impl <T: Consumer + 'static> ConsumeBuilder<T>
-{
+impl<T: Consumer + 'static> ConsumeBuilder<T> {
     pub fn new<S>(callback: T, name: S) -> ConsumeBuilder<T>
-        where S: Into<String>
+    where
+        S: Into<String>,
     {
         ConsumeBuilder {
             _callback: callback,
@@ -35,7 +36,8 @@ impl <T: Consumer + 'static> ConsumeBuilder<T>
     }
 
     pub fn tag<S>(mut self, tag: S) -> ConsumeBuilder<T>
-        where S: Into<String>
+    where
+        S: Into<String>,
     {
         self._tag = tag.into();
         self
@@ -70,7 +72,8 @@ impl <T: Consumer + 'static> ConsumeBuilder<T>
             self._no_ack,
             self._exclusive,
             self._nowait,
-            self._arguments)
+            self._arguments,
+        )
     }
 }
 
@@ -86,7 +89,9 @@ pub struct QueueBuilder {
 
 impl QueueBuilder {
     pub fn named<S>(name: S) -> QueueBuilder
-        where S: Into<String> {
+    where
+        S: Into<String>,
+    {
         QueueBuilder {
             _name: name.into(),
             _passive: false,
@@ -94,7 +99,7 @@ impl QueueBuilder {
             _exclusive: false,
             _auto_delete: false,
             _nowait: false,
-            _arguments: Table::new()
+            _arguments: Table::new(),
         }
     }
 
@@ -128,8 +133,10 @@ impl QueueBuilder {
         self
     }
 
-    pub fn declare(&self, channel: &mut Channel) ->
-        AMQPResult<protocol::queue::DeclareOk> {
+    pub fn declare(
+        &self,
+        channel: &mut Channel,
+    ) -> AMQPResult<protocol::queue::DeclareOk> {
         channel.queue_declare(
             self._name.clone(),
             self._passive,
@@ -137,6 +144,7 @@ impl QueueBuilder {
             self._exclusive,
             self._auto_delete,
             self._nowait,
-            self._arguments.clone())
+            self._arguments.clone(),
+        )
     }
 }

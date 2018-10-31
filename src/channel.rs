@@ -1,14 +1,15 @@
 use amqp_error::{AMQPResult, AMQPError};
 use std::sync::mpsc::Receiver;
 
-use amq_proto::{MethodFrame, ContentHeaderFrame, Frame, FramePayload, FrameType, EncodedProperties};
+use amq_proto::{MethodFrame, ContentHeaderFrame, Frame, FramePayload,
+                FrameType, EncodedProperties};
 use amq_proto::Table;
 use protocol;
 use basic::{Basic, GetIterator};
 use protocol::{channel, basic};
 use protocol::basic::BasicProperties;
-use protocol::basic::{Consume, ConsumeOk, Deliver, Publish, Ack, Nack, Reject, Qos, QosOk, Cancel,
-                      CancelOk};
+use protocol::basic::{Consume, ConsumeOk, Deliver, Publish, Ack, Nack, Reject,
+                      Qos, QosOk, Cancel, CancelOk};
 use connection::Connection;
 use std::collections::HashMap;
 use std::cell::RefCell;
@@ -16,32 +17,43 @@ use std::rc::Rc;
 use amq_proto::Method;
 
 pub trait Consumer: Send {
-    fn handle_delivery(&mut self,
-                       channel: &mut Channel,
-                       method: basic::Deliver,
-                       headers: BasicProperties,
-                       body: Vec<u8>);
+    fn handle_delivery(
+        &mut self,
+        channel: &mut Channel,
+        method: basic::Deliver,
+        headers: BasicProperties,
+        body: Vec<u8>,
+    );
 }
 
 impl<F> Consumer for F
-    where F: FnMut(&mut Channel, basic::Deliver, BasicProperties, Vec<u8>) + Send + 'static
+where
+    F: FnMut(&mut Channel,
+          basic::Deliver,
+          BasicProperties,
+          Vec<u8>)
+        + Send
+        + 'static,
 {
-    fn handle_delivery(&mut self,
-                       channel: &mut Channel,
-                       method: basic::Deliver,
-                       headers: BasicProperties,
-                       body: Vec<u8>) {
+    fn handle_delivery(
+        &mut self,
+        channel: &mut Channel,
+        method: basic::Deliver,
+        headers: BasicProperties,
+        body: Vec<u8>,
+    ) {
         self(channel, method, headers, body);
     }
 }
 
-impl Consumer for Box<Consumer>
-{
-    fn handle_delivery(&mut self,
-                       channel: &mut Channel,
-                       method: basic::Deliver,
-                       headers: BasicProperties,
-                       body: Vec<u8>) {
+impl Consumer for Box<Consumer> {
+    fn handle_delivery(
+        &mut self,
+        channel: &mut Channel,
+        method: basic::Deliver,
+        headers: BasicProperties,
+        body: Vec<u8>,
+    ) {
         (**self).handle_delivery(channel, method, headers, body);
     }
 }
@@ -56,7 +68,11 @@ pub struct Channel {
 unsafe impl Send for Channel {}
 
 impl Channel {
-    pub fn new(id: u16, receiver: Receiver<AMQPResult<Frame>>, connection: Connection) -> Channel {
+    pub fn new(
+        id: u16,
+        receiver: Receiver<AMQPResult<Frame>>,
+        connection: Connection,
+    ) -> Channel {
         Channel {
             id: id,
             receiver: receiver,
@@ -69,8 +85,13 @@ impl Channel {
         let meth = protocol::channel::Open { out_of_band: "".to_owned() };
         self.rpc(&meth, "channel.open-ok")
     }
-    pub fn close<T>(&mut self, reply_code: u16, reply_text: T) -> AMQPResult<channel::CloseOk>
-        where T: Into<String>
+    pub fn close<T>(
+        &mut self,
+        reply_code: u16,
+        reply_text: T,
+    ) -> AMQPResult<channel::CloseOk>
+    where
+        T: Into<String>,
     {
         let close = &channel::Close {
             reply_code: reply_code,
@@ -85,10 +106,16 @@ impl Channel {
     pub fn read(&mut self) -> AMQPResult<Frame> {
         let mut unprocessed_frame = None;
         while unprocessed_frame.is_none() {
-            let frame = try!(self.receiver
-                .recv()
-                .map_err(|_| AMQPError::Protocol("Error reading packet from channel".to_owned()))
-                .and_then(|frame| frame));
+            let frame = try!(
+                self.receiver
+                    .recv()
+                    .map_err(|_| {
+                        AMQPError::Protocol(
+                            "Error reading packet from channel".to_owned(),
+                        )
+                    })
+                    .and_then(|frame| frame)
+            );
             unprocessed_frame = try!(self.try_consume(frame));
         }
         Ok(unprocessed_frame.unwrap())
@@ -99,7 +126,8 @@ impl Channel {
     }
 
     pub fn send_method_frame<T>(&mut self, method: &T) -> AMQPResult<()>
-        where T: Method
+    where
+        T: Method,
     {
         debug!("Sending method {} to channel {}", method.name(), self.id);
         let id = self.id;
@@ -108,24 +136,35 @@ impl Channel {
 
     // Send method frame, receive method frame, try to return expected method frame
     // or return error.
-    pub fn rpc<I, O>(&mut self, method: &I, expected_reply: &str) -> AMQPResult<O>
-        where I: Method,
-              O: Method
+    pub fn rpc<I, O>(
+        &mut self,
+        method: &I,
+        expected_reply: &str,
+    ) -> AMQPResult<O>
+    where
+        I: Method,
+        O: Method,
     {
         let method_frame = try!(self.raw_rpc(method));
         match method_frame.method_name() {
-            m_name if m_name == expected_reply => Method::decode(method_frame).map_err(From::from),
+            m_name if m_name == expected_reply => {
+                Method::decode(method_frame).map_err(From::from)
+            }
             m_name => {
-                Err(AMQPError::Protocol(format!("Unexpected method frame: {}, expected: {}",
-                                                m_name,
-                                                expected_reply)))
+                error!("{:?}", method_frame);
+                Err(AMQPError::Protocol(format!(
+                    "Unexpected method frame: {}, expected: {}",
+                    m_name,
+                    expected_reply
+                )))
             }
         }
     }
 
     // Send method frame, receive and return method frame.
     pub fn raw_rpc<T>(&mut self, method: &T) -> AMQPResult<MethodFrame>
-        where T: Method
+    where
+        T: Method,
     {
         try!(self.send_method_frame(method));
         MethodFrame::decode(&try!(self.read())).map_err(From::from)
@@ -143,17 +182,19 @@ impl Channel {
         Ok(body)
     }
 
-    pub fn exchange_declare<S>(&mut self,
-                               exchange: S,
-                               _type: S,
-                               passive: bool,
-                               durable: bool,
-                               auto_delete: bool,
-                               internal: bool,
-                               nowait: bool,
-                               arguments: Table)
-                               -> AMQPResult<protocol::exchange::DeclareOk>
-        where S: Into<String>
+    pub fn exchange_declare<S>(
+        &mut self,
+        exchange: S,
+        _type: S,
+        passive: bool,
+        durable: bool,
+        auto_delete: bool,
+        internal: bool,
+        nowait: bool,
+        arguments: Table,
+    ) -> AMQPResult<protocol::exchange::DeclareOk>
+    where
+        S: Into<String>,
     {
         let declare = protocol::exchange::Declare {
             ticket: 0,
@@ -169,13 +210,15 @@ impl Channel {
         self.rpc(&declare, "exchange.declare-ok")
     }
 
-    pub fn exchange_bind<S>(&mut self,
-                            destination: S,
-                            source: S,
-                            routing_key: S,
-                            arguments: Table)
-                            -> AMQPResult<protocol::exchange::BindOk>
-        where S: Into<String>
+    pub fn exchange_bind<S>(
+        &mut self,
+        destination: S,
+        source: S,
+        routing_key: S,
+        arguments: Table,
+    ) -> AMQPResult<protocol::exchange::BindOk>
+    where
+        S: Into<String>,
     {
         let bind = protocol::exchange::Bind {
             ticket: 0,
@@ -188,16 +231,18 @@ impl Channel {
         self.rpc(&bind, "exchange.bind-ok")
     }
 
-    pub fn queue_declare<S>(&mut self,
-                            queue: S,
-                            passive: bool,
-                            durable: bool,
-                            exclusive: bool,
-                            auto_delete: bool,
-                            nowait: bool,
-                            arguments: Table)
-                            -> AMQPResult<protocol::queue::DeclareOk>
-        where S: Into<String>
+    pub fn queue_declare<S>(
+        &mut self,
+        queue: S,
+        passive: bool,
+        durable: bool,
+        exclusive: bool,
+        auto_delete: bool,
+        nowait: bool,
+        arguments: Table,
+    ) -> AMQPResult<protocol::queue::DeclareOk>
+    where
+        S: Into<String>,
     {
         let declare = protocol::queue::Declare {
             ticket: 0,
@@ -212,14 +257,16 @@ impl Channel {
         self.rpc(&declare, "queue.declare-ok")
     }
 
-    pub fn queue_bind<S>(&mut self,
-                         queue: S,
-                         exchange: S,
-                         routing_key: S,
-                         nowait: bool,
-                         arguments: Table)
-                         -> AMQPResult<protocol::queue::BindOk>
-        where S: Into<String>
+    pub fn queue_bind<S>(
+        &mut self,
+        queue: S,
+        exchange: S,
+        routing_key: S,
+        nowait: bool,
+        arguments: Table,
+    ) -> AMQPResult<protocol::queue::BindOk>
+    where
+        S: Into<String>,
     {
         let bind = protocol::queue::Bind {
             ticket: 0,
@@ -247,39 +294,67 @@ impl Channel {
         }
     }
 
+    /// Handle a basic.deliver frame from the AMQP broker.
+    fn handle_basic_deliver_frame(&mut self, method_frame: MethodFrame)
+            -> AMQPResult<Option<Frame>> {
+        let headers = try!(self.read_headers());
+        let body = try!(self.read_body(headers.body_size));
+        let properties = try!(BasicProperties::decode(headers));
+
+        let deliver_frame: Deliver = try!(Method::decode(method_frame));
+        let consumer_maps = self.consumers.clone();
+        let mut consumers = consumer_maps.borrow_mut();
+        match consumers.get_mut(&deliver_frame.consumer_tag) {
+            Some(consumer) => {
+                consumer.handle_delivery(
+                    self,
+                    deliver_frame,
+                    properties,
+                    body,
+                );
+                Ok(None)
+            }
+            None => {
+                error!(
+                    "Received deliver frame for the unknown consumer: {}",
+                    deliver_frame.consumer_tag
+                );
+                Ok(None)
+            }
+        }
+    }
+
     fn try_consume(&mut self, frame: Frame) -> AMQPResult<Option<Frame>> {
         match frame.frame_type {
             FrameType::METHOD => {
                 let method_frame = try!(MethodFrame::decode(&frame));
                 match method_frame.method_name() {
                     "basic.deliver" => {
-                        let deliver_method: Deliver = try!(Method::decode(method_frame));
-                        let headers = try!(self.read_headers());
-                        let body = try!(self.read_body(headers.body_size));
-                        let properties = try!(BasicProperties::decode(headers));
-                        let conss1 = self.consumers.clone();
-                        let mut conss = conss1.borrow_mut();
-                        let cons = conss.get_mut(&deliver_method.consumer_tag);
-                        match cons {
-                            Some(mut consumer) => {
-                                consumer.handle_delivery(self, deliver_method, properties, body);
-                                Ok(None)
-                            }
-                            None => {
-                                error!("Received deliver frame for the unknown consumer: {}",
-                                       deliver_method.consumer_tag);
-                                Ok(None)
-                            }
-                        }
+                        self.handle_basic_deliver_frame(method_frame)
+                    }
+                    "basic.ack" => {
+                        info!("Received basic.ack frame.");
+                        Ok(Some(frame))
                     }
                     // connection:blocked
                     // connection:unblocked
-                    // TODO: Handle other methods as well (basic.ack, basic.nack)
-                    _ => Ok(Some(frame)),
+                    // TODO: Handle other methods as well (basic.ack,
+                    // basic.nack)
+                    _ => {
+                        info!(
+                            "Received method frame {:?}",
+                            method_frame.method_name()
+                        );
+                        Ok(Some(frame))
+                    }
                 }
             }
             _ => {
                 // Pass on all other types of frames
+                info!(
+                    "Received some other frame {:?}",
+                    std::str::from_utf8(frame.payload.inner())
+                );
                 Ok(Some(frame))
             }
         }
@@ -306,22 +381,28 @@ impl<'a> Basic<'a> for Channel {
     /// }
     /// ```
     ///
-    fn basic_get(&'a mut self, queue: &'a str, no_ack: bool) -> GetIterator<'a> {
+    fn basic_get(
+        &'a mut self,
+        queue: &'a str,
+        no_ack: bool,
+    ) -> GetIterator<'a> {
         GetIterator::new(self, queue, no_ack)
     }
 
-    fn basic_consume<T, S>(&mut self,
-                           callback: T,
-                           queue: S,
-                           consumer_tag: S,
-                           no_local: bool,
-                           no_ack: bool,
-                           exclusive: bool,
-                           nowait: bool,
-                           arguments: Table)
-                           -> AMQPResult<String>
-        where T: Consumer + 'static,
-              S: Into<String>
+    fn basic_consume<T, S>(
+        &mut self,
+        callback: T,
+        queue: S,
+        consumer_tag: S,
+        no_local: bool,
+        no_ack: bool,
+        exclusive: bool,
+        nowait: bool,
+        arguments: Table,
+    ) -> AMQPResult<String>
+    where
+        T: Consumer + 'static,
+        S: Into<String>,
     {
         let consume = &Consume {
             ticket: 0,
@@ -334,26 +415,35 @@ impl<'a> Basic<'a> for Channel {
             arguments: arguments,
         };
         let reply: ConsumeOk = try!(self.rpc(consume, "basic.consume-ok"));
-        self.consumers.borrow_mut().insert(reply.consumer_tag.clone(), Box::new(callback));
+        self.consumers.borrow_mut().insert(
+            reply.consumer_tag.clone(),
+            Box::new(callback),
+        );
         Ok(reply.consumer_tag)
     }
 
-    fn basic_publish<S>(&mut self,
-                        exchange: S,
-                        routing_key: S,
-                        mandatory: bool,
-                        immediate: bool,
-                        properties: BasicProperties,
-                        content: Vec<u8>)
-                        -> AMQPResult<()>
-        where S: Into<String>
+    fn basic_publish<S>(
+        &mut self,
+        exchange: S,
+        routing_key: S,
+        mandatory: bool,
+        immediate: bool,
+        properties: BasicProperties,
+        content: Vec<u8>,
+    ) -> AMQPResult<()>
+    where
+        S: Into<String>,
     {
         if mandatory {
-            warn!("basic_publish(mandatory=true) failures are not handled and result in blocked channels!");
+            warn!(
+                "basic_publish(mandatory=true) failures are not handled and result in blocked channels!"
+            );
         }
 
         if immediate {
-            warn!("basic_publish(immediate=true) failures are not handled and result in blocked channels!");
+            warn!(
+                "basic_publish(immediate=true) failures are not handled and result in blocked channels!"
+            );
         }
 
         let publish = &Publish {
@@ -388,7 +478,11 @@ impl<'a> Basic<'a> for Channel {
         Ok(())
     }
 
-    fn basic_ack(&mut self, delivery_tag: u64, multiple: bool) -> AMQPResult<()> {
+    fn basic_ack(
+        &mut self,
+        delivery_tag: u64,
+        multiple: bool,
+    ) -> AMQPResult<()> {
         self.send_method_frame(&Ack {
             delivery_tag: delivery_tag,
             multiple: multiple,
@@ -396,7 +490,12 @@ impl<'a> Basic<'a> for Channel {
     }
 
     // Rabbitmq specific
-    fn basic_nack(&mut self, delivery_tag: u64, multiple: bool, requeue: bool) -> AMQPResult<()> {
+    fn basic_nack(
+        &mut self,
+        delivery_tag: u64,
+        multiple: bool,
+        requeue: bool,
+    ) -> AMQPResult<()> {
         self.send_method_frame(&Nack {
             delivery_tag: delivery_tag,
             multiple: multiple,
@@ -404,7 +503,11 @@ impl<'a> Basic<'a> for Channel {
         })
     }
 
-    fn basic_reject(&mut self, delivery_tag: u64, requeue: bool) -> AMQPResult<()> {
+    fn basic_reject(
+        &mut self,
+        delivery_tag: u64,
+        requeue: bool,
+    ) -> AMQPResult<()> {
         self.send_method_frame(&Reject {
             delivery_tag: delivery_tag,
             requeue: requeue,
@@ -415,11 +518,12 @@ impl<'a> Basic<'a> for Channel {
         self.basic_qos(0, prefetch_count, false)
     }
 
-    fn basic_qos(&mut self,
-                 prefetch_size: u32,
-                 prefetch_count: u16,
-                 global: bool)
-                 -> AMQPResult<QosOk> {
+    fn basic_qos(
+        &mut self,
+        prefetch_size: u32,
+        prefetch_count: u16,
+        global: bool,
+    ) -> AMQPResult<QosOk> {
         let qos = &Qos {
             prefetch_size: prefetch_size,
             prefetch_count: prefetch_count,
@@ -428,7 +532,11 @@ impl<'a> Basic<'a> for Channel {
         self.rpc(qos, "basic.qos-ok")
     }
 
-    fn basic_cancel(&mut self, consumer_tag: String, no_wait: bool) -> AMQPResult<CancelOk> {
+    fn basic_cancel(
+        &mut self,
+        consumer_tag: String,
+        no_wait: bool,
+    ) -> AMQPResult<CancelOk> {
         let cancel = &Cancel {
             consumer_tag: consumer_tag,
             nowait: no_wait,

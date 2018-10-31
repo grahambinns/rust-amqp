@@ -36,7 +36,9 @@ impl error::Error for AMQPError {
             AMQPError::QueueEmpty => "Queue is empty",
             AMQPError::SyncError => "Synchronisation error",
             AMQPError::FramingError(ref err) => err,
-            AMQPError::VHostError => "Access to vhost is denied for a current user",
+            AMQPError::VHostError => {
+                "Access to vhost is denied for a current user"
+            }
         }
     }
 }
@@ -49,8 +51,8 @@ impl From<io::Error> for AMQPError {
     }
 }
 
-impl <T> From<::std::sync::PoisonError<T>> for AMQPError {
-    fn from(_ : ::std::sync::PoisonError<T>) -> AMQPError {
+impl<T> From<::std::sync::PoisonError<T>> for AMQPError {
+    fn from(_: ::std::sync::PoisonError<T>) -> AMQPError {
         AMQPError::SyncError
     }
 }
